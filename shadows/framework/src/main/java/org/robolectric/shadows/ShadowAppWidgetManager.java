@@ -18,6 +18,9 @@ import android.os.Build.VERSION;
 import android.os.Bundle;
 import android.os.UserHandle;
 import android.view.View;
+import android.widget.Adapter;
+import android.widget.AdapterView;
+import android.widget.BaseAdapter;
 import android.widget.RemoteViews;
 import com.android.internal.appwidget.IAppWidgetService;
 import com.google.common.collect.HashMultimap;
@@ -96,6 +99,69 @@ public class ShadowAppWidgetManager {
       widgetInfo.layoutId = getRemoteViewsToApply(views).getLayoutId();
     }
     widgetInfo.lastRemoteViews = views;
+  }
+
+  /**
+   * Tells the widgets' collection with {@code viewId} that its data changed, as the system does: a
+   * collection backed by a {@code RemoteViewsService} reloads from its factory ({@code
+   * onDataSetChanged()}), and a collection the framework converted into items (SDK 35+) has its
+   * items collected again from the service; the widget's view is then applied anew, as by {@link
+   * #reconstructWidgetViewAsIfPhoneWasRotated}.
+   */
+  @Implementation
+  protected void notifyAppWidgetViewDataChanged(int[] appWidgetIds, int viewId) {
+    for (int appWidgetId : appWidgetIds) {
+      notifyAppWidgetViewDataChanged(appWidgetId, viewId);
+    }
+  }
+
+  /** As {@link #notifyAppWidgetViewDataChanged(int[], int)}. */
+  @Implementation
+  protected void notifyAppWidgetViewDataChanged(int appWidgetId, int viewId) {
+    WidgetInfo widgetInfo = widgetInfos.get(appWidgetId);
+    if (widgetInfo == null || widgetInfo.view == null) {
+      return;
+    }
+    if (widgetInfo.lastRemoteViews != null && clearCollectedItems(widgetInfo.lastRemoteViews)) {
+      // Applied afresh: a converted collection is only applied inside an AppWidgetHostView, and
+      // the widget's view was applied without staying in one.
+      widgetInfo.view = widgetInfo.lastRemoteViews.apply(context, new AppWidgetHostView(context));
+      return;
+    }
+    // As AppWidgetHostView.viewDataChanged.
+    View collection = widgetInfo.view.findViewById(viewId);
+    if (collection instanceof AdapterView) {
+      Adapter adapter = ((AdapterView<?>) collection).getAdapter();
+      if (adapter instanceof BaseAdapter) {
+        ((BaseAdapter) adapter).notifyDataSetChanged();
+      }
+    }
+  }
+
+  /**
+   * Forgets the items collected from a {@code RemoteViewsService} for the converted collections of
+   * {@code views}, so they are collected again when next applied. Returns whether there were any.
+   */
+  private static boolean clearCollectedItems(RemoteViews views) {
+    if (VERSION.SDK_INT < VANILLA_ICE_CREAM) {
+      return false;
+    }
+    List<?> actions = ReflectionHelpers.getField(views, "mActions");
+    if (actions == null) {
+      return false;
+    }
+    boolean cleared = false;
+    for (Object action : actions) {
+      if (action
+              .getClass()
+              .getName()
+              .equals("android.widget.RemoteViews$SetRemoteCollectionItemListAdapterAction")
+          && ReflectionHelpers.getField(action, "mServiceIntent") != null) {
+        ReflectionHelpers.setField(action, "mItems", null);
+        cleared = true;
+      }
+    }
+    return cleared;
   }
 
   private boolean canReapplyRemoteViews(WidgetInfo widgetInfo, RemoteViews views) {
