@@ -29,6 +29,7 @@ import android.util.DisplayMetrics;
 import android.view.Display;
 import android.view.ViewRootImpl;
 import android.view.WindowManager;
+import android.view.WindowManagerGlobal;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import javax.annotation.Nullable;
 import org.robolectric.RuntimeEnvironment;
@@ -342,6 +343,10 @@ public class ActivityController<T extends Activity>
       WindowManager windowManager = component.getWindowManager();
       windowManager.removeViewImmediate(component.getWindow().getDecorView());
     }
+    // Then remove the windows the activity still owns, such as dialogs and popups left showing,
+    // logging each as leaked, as ActivityThread.handleDestroyActivity does.
+    WindowManagerGlobal.getInstance()
+        .closeAll(component.getActivityToken(), component.getClass().getName(), "Activity");
     if (RuntimeEnvironment.getApiLevel() >= O_MR1) {
       // Starting Android O_MR1, there is a leak in Android where `ContextImpl` holds on to the
       // activity after being destroyed. This "fixes" the leak in Robolectric only, and will be

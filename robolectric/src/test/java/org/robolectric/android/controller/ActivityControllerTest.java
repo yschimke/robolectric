@@ -14,6 +14,7 @@ import static org.robolectric.util.reflector.Reflector.reflector;
 
 import android.app.Activity;
 import android.app.ActivityOptions;
+import android.app.Dialog;
 import android.app.Fragment;
 import android.app.WindowConfiguration;
 import android.content.ComponentName;
@@ -30,6 +31,7 @@ import android.view.View;
 import android.view.ViewRootImpl;
 import android.view.Window;
 import android.view.WindowManager;
+import android.view.WindowManagerGlobal;
 import android.widget.LinearLayout;
 import androidx.test.core.app.ApplicationProvider;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -213,6 +215,36 @@ public class ActivityControllerTest {
     controller.pause().stop().destroy();
     assertThat(shadowWindowManager.getViews())
         .doesNotContain(controller.get().getWindow().getDecorView());
+  }
+
+  @Test
+  public void destroy_removesUndismissedDialogs() {
+    controller.create().start().resume().visible();
+    Dialog dialog = new Dialog(controller.get());
+    dialog.show();
+    shadowMainLooper().idle();
+    View dialogDecorView = dialog.getWindow().getDecorView();
+    assertThat(dialogDecorView.isAttachedToWindow()).isTrue();
+
+    controller.pause().stop().destroy();
+    shadowMainLooper().idle();
+
+    assertThat(dialogDecorView.isAttachedToWindow()).isFalse();
+    assertThat(WindowManagerGlobal.getInstance().getViewRootNames()).isEmpty();
+  }
+
+  @Test
+  public void destroy_keepsOtherActivitiesDialogs() {
+    ActivityController<Activity> other = Robolectric.buildActivity(Activity.class).setup();
+    Dialog otherDialog = new Dialog(other.get());
+    otherDialog.show();
+    shadowMainLooper().idle();
+
+    controller.setup().pause().stop().destroy();
+    shadowMainLooper().idle();
+
+    assertThat(otherDialog.getWindow().getDecorView().isAttachedToWindow()).isTrue();
+    assertThat(otherDialog.isShowing()).isTrue();
   }
 
   @Test
